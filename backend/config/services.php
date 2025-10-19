@@ -35,4 +35,10 @@ return [
         ],
     ],
 
+    'mercadolivre' => [
+        'app_id' => env('MERCADOLIVRE_APP_ID'),
+        'secret_key' => env('MERCADOLIVRE_SECRET_KEY'),
+        'redirect_uri' => env('MERCADOLIVRE_REDIRECT_URI', 'https://www.google.com'),
+    ],
+
 ];
