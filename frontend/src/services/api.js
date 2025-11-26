@@ -1,19 +1,18 @@
 import axios from "axios";
 
-// Configuração base do Axios
 const api = axios.create({
   baseURL: "http://localhost:8000/api",
-  timeout: 10000,
+  timeout: 60000,
   headers: {
     "Content-Type": "application/json",
     Accept: "application/json",
   },
 });
 
-// Interceptor para logs (opcional, útil para debug)
 api.interceptors.request.use(
   (config) => {
-    console.log("Requisição:", config.method.toUpperCase(), config.url);
+    config.metadata = { startTime: new Date().getTime() };
+    console.log("Requisição:", config.method.toUpperCase(), config.url, "params:", config.params);
     return config;
   },
   (error) => {
@@ -24,14 +23,26 @@ api.interceptors.request.use(
 
 api.interceptors.response.use(
   (response) => {
-    console.log("📥 Resposta:", response.status, response.data);
+    try {
+      const start = response.config?.metadata?.startTime;
+      const duration = start ? (new Date().getTime() - start) : null;
+      console.log("📥 Resposta:", response.status, `(${duration}ms)` , response.data);
+    } catch (err) {
+      console.error('Erro ao processar interceptor de resposta:', err);
+      console.log("📥 Resposta:", response.status, response.data);
+    }
     return response;
   },
   (error) => {
-    console.error(
-      "Erro na resposta:",
-      error.response?.data || error.message
-    );
+    try {
+      const start = error.config?.metadata?.startTime;
+      const duration = start ? (new Date().getTime() - start) : null;
+      console.error("Erro na resposta:", error.response?.data || error.message, `(duration: ${duration}ms)`);
+      console.error("Erro.config:", error.config);
+    } catch (err) {
+      console.error('Erro ao processar interceptor de erro:', err);
+      console.error("Erro na resposta:", error.response?.data || error.message);
+    }
     return Promise.reject(error);
   }
 );

@@ -2,35 +2,35 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Services\MarketplaceService;
+use App\Http\Services\EbayService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Exception;
 
 class MarketplaceController extends Controller
 {
-    protected MarketplaceService $mlService;
+    protected EbayService $ebayService;
 
-    public function __construct(MarketplaceService $mlService)
+    public function __construct(EbayService $ebayService)
     {
-        $this->mlService = $mlService;
+        $this->ebayService = $ebayService;
     }
+
+    /**
+     * Listar ofertas do eBay
+     */
     public function index(Request $request): JsonResponse
     {
         try {
             $filtros = [
-                'q' => $request->input('q'), // termo de busca
-                'limit' => $request->input('limit', 20),
-                'offset' => $request->input('offset', 0),
-                'category' => $request->input('category'),
-                'desconto_minimo' => $request->input('desconto_minimo'),
-                'preco_min' => $request->input('preco_min'),
-                'preco_max' => $request->input('preco_max'),
+                'q' => $request->input('q'),
+                'limit' => $request->input('limit', 100),
             ];
 
-            $resultado = $this->mlService->buscarOfertas($filtros);
+            $resultado = $this->ebayService->buscarOfertas($filtros);
 
             return response()->json($resultado, 200);
+
         } catch (Exception $e) {
             return response()->json([
                 'sucesso' => false,
@@ -40,23 +40,62 @@ class MarketplaceController extends Controller
     }
 
     /**
-     * Testar conexão com API
+     * Ofertas em destaque
+     */
+    public function destaque(): JsonResponse
+    {
+        try {
+            $resultado = $this->ebayService->buscarOfertas([
+                'q' => null,
+                'limit' => 20,
+            ]);
+
+            return response()->json($resultado, 200);
+
+        } catch (Exception $e) {
+            return response()->json([
+                'sucesso' => false,
+                'erro' => 'Erro ao buscar destaques: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Testar conexão com API do eBay
      */
     public function testar(): JsonResponse
     {
         try {
-            $conectado = $this->mlService->testarConexao();
+            $conectado = $this->ebayService->testarConexao();
 
             return response()->json([
                 'conectado' => $conectado,
                 'mensagem' => $conectado
-                    ? 'Conexão com Mercado Livre OK!'
-                    : 'Erro ao conectar'
+                    ? '✅ Conexão com eBay OK!'
+                    : '❌ Erro ao conectar com eBay'
             ], 200);
+
         } catch (Exception $e) {
             return response()->json([
                 'conectado' => false,
                 'erro' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Listar categorias
+     */
+    public function categorias(): JsonResponse
+    {
+        try {
+            $resultado = $this->ebayService->buscarCategorias();
+            return response()->json($resultado, 200);
+
+        } catch (Exception $e) {
+            return response()->json([
+                'sucesso' => false,
+                'erro' => 'Erro ao buscar categorias: ' . $e->getMessage()
             ], 500);
         }
     }

@@ -1,17 +1,17 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
-import Navbar from './components/Navbar';
-import CategoryFilter from './components/CategoryFilter';
-import ProductCard from './components/ProductCard';
-import ofertasService from './services/ofertasService';
-import { Loader2, TrendingDown, Zap, AlertCircle } from 'lucide-react';
+import { useState, useEffect, useRef, useMemo } from "react";
+import Navbar from "./components/Navbar";
+import CategoryFilter from "./components/CategoryFilter";
+import ProductCard from "./components/ProductCard";
+import ofertasService from "./services/ofertasService";
+import { Loader2, TrendingDown, Zap, AlertCircle } from "lucide-react";
 
 function App() {
   const [produtos, setProdutos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [selectedCategory, setSelectedCategory] = useState('all');
-  const [busca, setBusca] = useState('');
-  const [sortOption, setSortOption] = useState('maior_desconto'); // default
+  const [selectedCategory, setSelectedCategory] = useState("all");
+  const [busca, setBusca] = useState("");
+  const [sortOption, setSortOption] = useState("maior_desconto"); // default
   const searchTimeout = useRef(null);
 
   useEffect(() => {
@@ -25,10 +25,23 @@ function App() {
     try {
       const termoLocal = overrideBusca !== null ? overrideBusca : busca;
 
+      let termoBuscaEbay = termoLocal;
+
+      if (!termoBuscaEbay && selectedCategory !== "all") {
+        const categoriaMap = {
+          MLB1055: "smartphone",
+          MLB1196: "notebook",
+          MLB1002: "smart tv",
+          MLB1144: "gaming console",
+          MLB1384: "book",
+          MLB1430: "sporting goods",
+        };
+        termoBuscaEbay = categoriaMap[selectedCategory] || "";
+      }
+
       const filtros = {
-        limit: 30,
-        ...(selectedCategory !== 'all' && { category: selectedCategory }),
-        ...(termoLocal && { q: termoLocal }),
+        limit: 100,
+        ...(termoBuscaEbay && { q: termoBuscaEbay }),
       };
 
       const data = await ofertasService.buscarOfertas(filtros);
@@ -36,11 +49,13 @@ function App() {
       if (data.sucesso) {
         setProdutos(data.produtos || []);
       } else {
-        setError(data.erro || 'Erro ao buscar produtos');
+        setError(data.erro || "Erro ao buscar produtos");
       }
     } catch (err) {
-      console.error('Erro:', err);
-      setError('Erro ao conectar com o servidor. Verifique se o backend está rodando.');
+      console.error("Erro:", err);
+      setError(
+        "Erro ao conectar com o servidor. Verifique se o backend está rodando."
+      );
     } finally {
       setLoading(false);
     }
@@ -59,12 +74,16 @@ function App() {
 
     const copia = [...produtos];
 
-    if (sortOption === 'maior_desconto') {
-      copia.sort((a, b) => (b.percentual_desconto || 0) - (a.percentual_desconto || 0));
-    } else if (sortOption === 'menor_preco') {
+    if (sortOption === "maior_desconto") {
+      copia.sort(
+        (a, b) => (b.percentual_desconto || 0) - (a.percentual_desconto || 0)
+      );
+    } else if (sortOption === "menor_preco") {
       copia.sort((a, b) => (a.preco_atual || 0) - (b.preco_atual || 0));
-    } else if (sortOption === 'mais_vendidos') {
-      copia.sort((a, b) => (b.quantidade_vendida || 0) - (a.quantidade_vendida || 0));
+    } else if (sortOption === "mais_vendidos") {
+      copia.sort(
+        (a, b) => (b.quantidade_vendida || 0) - (a.quantidade_vendida || 0)
+      );
     }
 
     return copia;
@@ -90,9 +109,10 @@ function App() {
               <span>Ofertas Imperdíveis!</span>
             </h1>
             <p className="text-xl text-blue-100 max-w-2xl mx-auto">
-              Encontre as melhores ofertas dos maiores Marketplaces em um só lugar!
+              Encontre as melhores ofertas dos maiores Marketplaces em um só
+              lugar!
             </p>
-            
+
             <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl mx-auto">
               <div className="bg-white/10 backdrop-blur-lg rounded-lg p-4">
                 <div className="text-3xl font-bold">{produtos.length}</div>
@@ -111,7 +131,6 @@ function App() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        
         <CategoryFilter
           selectedCategory={selectedCategory}
           onSelectCategory={setSelectedCategory}
@@ -122,7 +141,9 @@ function App() {
             <div className="flex items-center">
               <AlertCircle className="w-6 h-6 text-red-500 mr-3" />
               <div>
-                <p className="text-red-800 font-semibold">Erro ao carregar ofertas</p>
+                <p className="text-red-800 font-semibold">
+                  Erro ao carregar ofertas
+                </p>
                 <p className="text-red-600 text-sm">{error}</p>
               </div>
             </div>
@@ -138,7 +159,9 @@ function App() {
         {loading && (
           <div className="flex flex-col items-center justify-center py-20">
             <Loader2 className="w-12 h-12 text-primary-600 animate-spin mb-4" />
-            <p className="text-gray-600 text-lg">Carregando ofertas incríveis...</p>
+            <p className="text-gray-600 text-lg">
+              Carregando ofertas incríveis...
+            </p>
           </div>
         )}
 
@@ -161,7 +184,10 @@ function App() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
               {produtosOrdenados.map((produto) => (
-                <ProductCard key={produto.id_externo || produto.id} produto={produto} />
+                <ProductCard
+                  key={produto.id_externo || produto.id}
+                  produto={produto}
+                />
               ))}
             </div>
           </>
@@ -177,8 +203,8 @@ function App() {
             </p>
             <button
               onClick={() => {
-                setSelectedCategory('all');
-                setBusca('');
+                setSelectedCategory("all");
+                setBusca("");
                 buscarProdutos();
               }}
               className="btn-primary"
@@ -192,7 +218,7 @@ function App() {
       <footer className="bg-gray-900 text-white py-8 mt-16">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <p className="text-gray-400">
-            © 2025 EconomizAI - Encontre as melhores ofertas do Mercado Livre
+            © 2025 EconomizAI - Encontre as melhores ofertas
           </p>
         </div>
       </footer>

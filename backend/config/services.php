@@ -41,4 +41,10 @@ return [
         'redirect_uri' => env('MERCADOLIVRE_REDIRECT_URI', 'https://www.google.com'),
     ],
 
+    'ebay' => [
+        'app_id' => env('EBAY_APP_ID'),
+        'cert_id' => env('EBAY_CERT_ID'),
+        'base64_credentials' => env('EBAY_BASE64_CREDENTIALS'),
+        'marketplace_id' => env('EBAY_MARKETPLACE_ID', 'EBAY-BR'),
+    ],
 ];
