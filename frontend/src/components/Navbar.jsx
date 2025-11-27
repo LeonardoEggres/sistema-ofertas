@@ -8,7 +8,8 @@ const Navbar = ({ onBusca }) => {
   const handleBusca = (e) => {
     e.preventDefault();
     if (onBusca) {
-      onBusca(termoBusca);
+      const termo = termoBusca ? termoBusca.trim() : '';
+      onBusca(termo);
     }
   };
 
@@ -91,7 +92,6 @@ const Navbar = ({ onBusca }) => {
           </button>
         </div>
 
-        {/* Search Bar (Mobile) */}
         <div className="md:hidden pb-4">
           <form onSubmit={handleBusca} className="relative">
             <input

@@ -10,6 +10,7 @@ class EbayService
     private string $baseUrl = 'https://api.ebay.com/buy/browse/v1';
     private EbayAuthService $authService;
     private string $marketplaceId;
+    private ?float $taxaCambio = null;
 
     public function __construct(EbayAuthService $authService)
     {
@@ -17,9 +18,6 @@ class EbayService
         $this->marketplaceId = config('services.ebay.marketplace_id');
     }
 
-    /**
-     * Buscar ofertas de múltiplas categorias
-     */
     public function buscarOfertas(array $filtros = []): array
     {
         try {
@@ -30,16 +28,41 @@ class EbayService
                 return $this->retornarProdutosExemplo(50);
             }
 
-            $limit = $filtros['limit'] ?? 50;
+            $page = max(1, (int)($filtros['page'] ?? 1));
+            $perPage = max(1, (int)($filtros['per_page'] ?? ($filtros['limit'] ?? 25)));
             $termo = $filtros['q'] ?? null;
 
-            // Se tem termo específico, buscar apenas esse
+            $offset = ($page - 1) * $perPage;
+
             if ($termo) {
-                return $this->buscarPorTermo($accessToken, $termo, $limit);
+                $desiredTotal = (int) max(ceil($perPage * 2.0), 10); // pedir mais para compensar filtro
+                $resultado = $this->buscarPorTermo($accessToken, $termo, $desiredTotal, false); // false = apenas com desconto
+
+                $produtos = $resultado['produtos'] ?? [];
+
+                $termo_lower = strtolower($termo);
+                $produtos_filtrados = array_filter($produtos, function ($p) use ($termo_lower) {
+                    $nome_lower = strtolower($p['nome'] ?? '');
+                    return strpos($nome_lower, $termo_lower) !== false;
+                });
+                $produtos_filtrados = array_values($produtos_filtrados);
+
+                usort($produtos_filtrados, function ($a, $b) {
+                    return ($b['percentual_desconto'] ?? 0) <=> ($a['percentual_desconto'] ?? 0);
+                });
+
+                $sliced = array_slice($produtos_filtrados, $offset, $perPage);
+
+                return [
+                    'sucesso' => $resultado['sucesso'] ?? true,
+                    'page' => $page,
+                    'per_page' => $perPage,
+                    'total' => count($sliced),
+                    'produtos' => array_values($sliced),
+                ];
             }
 
-            // Se não tem termo, buscar de múltiplas categorias
-            return $this->buscarMultiplasCategorias($accessToken, $limit);
+            return $this->buscarMultiplasCategorias($accessToken, $offset, $perPage);
         } catch (\Exception $e) {
             Log::error('Exceção ao buscar ofertas eBay', [
                 'erro' => $e->getMessage()
@@ -48,80 +71,77 @@ class EbayService
         }
     }
 
-    /**
-     * Buscar produtos de múltiplas categorias e mesclar resultados
-     */
-    private function buscarMultiplasCategorias(string $accessToken, int $limitTotal): array
+    private function buscarMultiplasCategorias(string $accessToken, int $offset, int $perPage): array
     {
-        $categorias = [
-            'smartphone',
-            'notebook',
-            'smart tv',
-            'gaming console',
-            'book',
-            'sporting goods',
-            'camera',
-            'headphones',
-            'watch',
-            'tablet'
-        ];
+        $page = (int) floor($offset / $perPage) + 1;
+        if ($page <= 2) {
+            $categorias = ['smartphone', 'notebook', 'smart tv'];
+        } else {
+            $categorias = $this->getCategoriasDefault();
+        }
 
         $todosProdutos = [];
 
-        $produtosPorCategoria = 15;
+        $desiredTotal = (int) max(ceil($perPage * 1.5), 5);
+
+        $catCount = count($categorias) ?: 1;
+        $produtosPorCategoria = (int) max(ceil(($desiredTotal / $catCount) * 1.5), 5);
+
+        $seenIds = [];
 
         foreach ($categorias as $categoria) {
             try {
-
-                $resultado = $this->buscarPorTermo($accessToken, $categoria, $produtosPorCategoria);
+                $resultado = $this->buscarPorTermo($accessToken, $categoria, $produtosPorCategoria, false);
 
                 if ($resultado['sucesso'] && !empty($resultado['produtos'])) {
-                    $todosProdutos = array_merge($todosProdutos, $resultado['produtos']);
+                    foreach ($resultado['produtos'] as $p) {
+                        $id = $p['id_externo'] ?? null;
+                        if ($id && isset($seenIds[$id])) {
+                            continue;
+                        }
+
+                        if (isset($p['percentual_desconto']) && (float)$p['percentual_desconto'] > 0) {
+                            $todosProdutos[] = $p;
+                            if ($id) $seenIds[$id] = true;
+                        }
+                    }
                 }
             } catch (\Exception $e) {
-                // ...
+                Log::warning('Erro ao buscar categoria eBay', ['categoria' => $categoria, 'erro' => $e->getMessage()]);
             }
         }
 
-        $todosProdutos = array_slice($todosProdutos, 0, $limitTotal);
-
+        $todosProdutos = array_values($todosProdutos);
         usort($todosProdutos, function ($a, $b) {
-            return $b['percentual_desconto'] <=> $a['percentual_desconto'];
+            return ($b['percentual_desconto'] ?? 0) <=> ($a['percentual_desconto'] ?? 0);
         });
+
+
+        $sliced = array_slice($todosProdutos, $offset, $perPage);
 
         return [
             'sucesso' => true,
-            'total' => count($todosProdutos),
-            'produtos' => $todosProdutos,
+            'page' => (int) floor($offset / $perPage) + 1,
+            'per_page' => $perPage,
+            'total' => count($sliced),
+            'produtos' => array_values($sliced),
         ];
     }
 
-    /**
-     * Buscar por termo específico
-     */
-    private function buscarPorTermo(string $accessToken, string $termo, int $limit): array
+    private function buscarPorTermo(string $accessToken, string $termo, int $limit, bool $allowWithoutDiscount = false): array
     {
         Log::info('Buscando no eBay', ['termo' => $termo, 'limit' => $limit]);
-
-        $url = "{$this->baseUrl}/item_summary/search?q=" . urlencode($termo) . "&limit={$limit}";
 
         $response = Http::withHeaders([
             'Authorization' => "Bearer {$accessToken}",
             'X-Ebay-C-Marketplace-Id' => $this->marketplaceId,
+        ])->withOptions([
+            'timeout' => 8,
+            'connect_timeout' => 3,
         ])->get("{$this->baseUrl}/item_summary/search", [
             'q' => $termo,
             'limit' => $limit,
         ]);
-
-        $produtos = $dados['itemSummaries'] ?? [];
-
-        $produtosComDesconto = array_filter($produtos, function ($produto) {
-            return isset($produto['marketingPrice']);
-        });
-
-        $produtosFormatados = array_map(function ($produto) {
-            return $this->formatarProduto($produto);
-        }, $produtosComDesconto);
 
         if ($response->failed()) {
             Log::error('Erro na API eBay', [
@@ -145,18 +165,23 @@ class EbayService
             ];
         }
 
-        $produtosComDesconto = array_filter($produtos, function ($produto) {
-            return isset($produto['marketingPrice']);
+        $produtosFiltrados = array_filter($produtos, function ($produto) {
+            return isset($produto['marketingPrice']) && isset($produto['marketingPrice']['originalPrice']);
         });
 
-        if (empty($produtosComDesconto)) {
-            Log::info("Nenhum produto com 'marketingPrice' encontrado para o termo: {$termo}");
+        if (empty($produtosFiltrados)) {
+            Log::info("Nenhum produto com desconto encontrado para o termo: {$termo}");
         }
 
-        // Formatar produtos
         $produtosFormatados = array_map(function ($produto) {
             return $this->formatarProduto($produto);
-        }, $produtosComDesconto);
+        }, $produtosFiltrados);
+
+        $produtosFormatados = array_filter($produtosFormatados, function ($p) {
+            return isset($p['percentual_desconto']) && (float)$p['percentual_desconto'] > 0;
+        });
+
+        $produtosFormatados = array_values($produtosFormatados);
 
         return [
             'sucesso' => true,
@@ -165,27 +190,111 @@ class EbayService
         ];
     }
 
-    /**
-     * Buscar categorias
-     */
+    private function buscarCategoriasDisponiveis(): array
+    {
+        try {
+            $accessToken = $this->authService->getValidAccessToken();
+
+            if (!$accessToken) {
+                Log::warning('Sem access token para buscar categorias');
+                return $this->getCategoriasDefault();
+            }
+
+            $response = Http::withHeaders([
+                'Authorization' => "Bearer {$accessToken}",
+                'X-Ebay-C-Marketplace-Id' => $this->marketplaceId,
+            ])->withOptions([
+                'timeout' => 8,
+                'connect_timeout' => 3,
+            ])->get('https://api.ebay.com/commerce/taxonomy/v1/category_tree/EBAY-BR/get_category_suggestions', [
+                'q' => '',
+            ]);
+
+            if ($response->failed()) {
+                Log::warning('Erro ao buscar categorias da API eBay', ['status' => $response->status()]);
+                return $this->getCategoriasDefault();
+            }
+
+            return $this->getCategoriasDefault();
+        } catch (\Exception $e) {
+            Log::warning('Exceção ao buscar categorias', ['erro' => $e->getMessage()]);
+            return $this->getCategoriasDefault();
+        }
+    }
+
     public function buscarCategorias(): array
     {
+        $raw = $this->buscarCategoriasDisponiveis();
+
+        if (!empty($raw) && is_array($raw) && isset($raw[0]) && is_array($raw[0]) && isset($raw[0]['id'])) {
+            return [
+                'sucesso' => true,
+                'categorias' => $raw,
+            ];
+        }
+
+        $categorias = [];
+        foreach ($raw as $idx => $name) {
+            $categorias[] = [
+                'id' => (string) ($idx + 1),
+                'name' => $name,
+            ];
+        }
+
         return [
             'sucesso' => true,
-            'categorias' => [
-                ['id' => '15032', 'name' => 'Celulares e Smartphones'],
-                ['id' => '171485', 'name' => 'Computadores e Notebooks'],
-                ['id' => '11071', 'name' => 'TVs'],
-                ['id' => '139973', 'name' => 'Games e Consoles'],
-                ['id' => '267', 'name' => 'Livros'],
-                ['id' => '888', 'name' => 'Artigos Esportivos'],
-            ],
+            'categorias' => $categorias,
         ];
     }
 
-    /**
-     * Testar conexão
-     */
+    private function getCategoriasDefault(): array
+    {
+        return [
+            'smartphone',
+            'notebook',
+            'smart tv',
+            'gaming console',
+            'book',
+            'sporting goods',
+            'camera',
+            'headphones',
+            'watch',
+            'tablet'
+        ];
+    }
+
+    private function obterTaxaCambio(): float
+    {
+        if ($this->taxaCambio !== null) {
+            return $this->taxaCambio;
+        }
+
+        try {
+            $response = Http::withOptions([
+                'timeout' => 5,
+                'connect_timeout' => 3,
+            ])->get('https://api.exchangerate-api.com/v4/latest/USD');
+
+            if ($response->successful()) {
+                $data = $response->json();
+                $taxa = $data['rates']['BRL'] ?? 5.0;
+                $this->taxaCambio = (float) $taxa;
+                return $this->taxaCambio;
+            }
+        } catch (\Exception $e) {
+            Log::warning('Erro ao obter taxa de câmbio', ['erro' => $e->getMessage()]);
+        }
+
+        $this->taxaCambio = 5.0;
+        return $this->taxaCambio;
+    }
+
+    private function converterParaReal(float $valorEmDolar): float
+    {
+        $taxa = $this->obterTaxaCambio();
+        return round($valorEmDolar * $taxa, 2);
+    }
+
     public function testarConexao(): bool
     {
         try {
@@ -196,18 +305,18 @@ class EbayService
         }
     }
 
-    /**
-     * Formatar produto
-     */
     private function formatarProduto(array $produto): array
     {
-        $precoAtual = isset($produto['price']['value'])
+        $precoAtualUsd = isset($produto['price']['value'])
             ? (float) $produto['price']['value']
             : 0;
 
-        $precoOriginal = isset($produto['marketingPrice']['originalPrice']['value'])
+        $precoOriginalUsd = isset($produto['marketingPrice']['originalPrice']['value'])
             ? (float) $produto['marketingPrice']['originalPrice']['value']
-            : $precoAtual;
+            : $precoAtualUsd;
+
+        $precoAtual = $this->converterParaReal($precoAtualUsd);
+        $precoOriginal = $this->converterParaReal($precoOriginalUsd);
 
         $percentualDesconto = $this->calcularDesconto($precoOriginal, $precoAtual);
         $economia = $precoOriginal - $precoAtual;
@@ -218,6 +327,9 @@ class EbayService
             'descricao' => $produto['shortDescription'] ?? null,
             'preco_atual' => $precoAtual,
             'preco_original' => $precoOriginal,
+            'moeda' => 'BRL',
+            'preco_original_usd' => $precoOriginalUsd,
+            'preco_atual_usd' => $precoAtualUsd,
             'percentual_desconto' => $percentualDesconto,
             'economia' => $economia,
             'url' => $produto['itemWebUrl'] ?? null,
@@ -237,9 +349,6 @@ class EbayService
         ];
     }
 
-    /**
-     * Calcular desconto
-     */
     private function calcularDesconto(float $precoOriginal, float $precoAtual): float
     {
         if ($precoOriginal <= 0 || $precoAtual >= $precoOriginal) {
@@ -248,9 +357,6 @@ class EbayService
         return round((($precoOriginal - $precoAtual) / $precoOriginal) * 100, 2);
     }
 
-    /**
-     * Produtos de exemplo
-     */
     private function retornarProdutosExemplo(int $limit): array
     {
         $exemplos = [

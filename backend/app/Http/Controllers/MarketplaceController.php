@@ -16,59 +16,53 @@ class MarketplaceController extends Controller
         $this->ebayService = $ebayService;
     }
 
-    /**
-     * Listar ofertas do eBay
-     */
     public function index(Request $request): JsonResponse
     {
         try {
             $filtros = [
                 'q' => $request->input('q'),
-                'limit' => $request->input('limit', 100),
+                'page' => max(1, (int)$request->input('page', 1)),
+                'per_page' => max(1, (int)$request->input('per_page', 25)),
             ];
 
             $resultado = $this->ebayService->buscarOfertas($filtros);
 
-            return response()->json($resultado, 200);
+            return $this->corsResponse($resultado, 200);
 
         } catch (Exception $e) {
-            return response()->json([
+            return $this->corsResponse([
                 'sucesso' => false,
                 'erro' => 'Erro ao buscar ofertas: ' . $e->getMessage()
             ], 500);
         }
     }
 
-    /**
-     * Ofertas em destaque
-     */
     public function destaque(): JsonResponse
     {
         try {
             $resultado = $this->ebayService->buscarOfertas([
                 'q' => null,
-                'limit' => 20,
+                'page' => 1,
+                'per_page' => 20,
             ]);
 
-            return response()->json($resultado, 200);
+            return $this->corsResponse($resultado, 200);
 
         } catch (Exception $e) {
-            return response()->json([
+            return $this->corsResponse([
                 'sucesso' => false,
                 'erro' => 'Erro ao buscar destaques: ' . $e->getMessage()
             ], 500);
         }
     }
 
-    /**
-     * Testar conexão com API do eBay
-     */
+
     public function testar(): JsonResponse
     {
         try {
             $conectado = $this->ebayService->testarConexao();
 
-            return response()->json([
+            return $this->corsResponse([
                 'conectado' => $conectado,
                 'mensagem' => $conectado
                     ? '✅ Conexão com eBay OK!'
@@ -76,27 +70,33 @@ class MarketplaceController extends Controller
             ], 200);
 
         } catch (Exception $e) {
-            return response()->json([
+            return $this->corsResponse([
                 'conectado' => false,
                 'erro' => $e->getMessage()
             ], 500);
         }
     }
 
-    /**
-     * Listar categorias
-     */
     public function categorias(): JsonResponse
     {
         try {
             $resultado = $this->ebayService->buscarCategorias();
-            return response()->json($resultado, 200);
+            return $this->corsResponse($resultado, 200);
 
         } catch (Exception $e) {
-            return response()->json([
+            return $this->corsResponse([
                 'sucesso' => false,
                 'erro' => 'Erro ao buscar categorias: ' . $e->getMessage()
             ], 500);
         }
+    }
+
+    private function corsResponse(array $data, int $status = 200)
+    {
+        return response()->json($data, $status)
+            ->header('Access-Control-Allow-Origin', '*')
+            ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+            ->header('Access-Control-Allow-Headers', 'Content-Type, Accept, Authorization, X-Requested-With')
+            ->header('Access-Control-Allow-Credentials', 'true');
     }
 }

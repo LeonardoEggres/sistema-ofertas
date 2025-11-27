@@ -16,9 +16,6 @@ class EbayAuthService
         $this->base64Credentials = config('services.ebay.base64_credentials');
     }
 
-    /**
-     * Obter Access Token válido (do cache ou renovando)
-     */
     public function getValidAccessToken(): ?string
     {
         $token = Cache::get('ebay_access_token');
@@ -31,9 +28,6 @@ class EbayAuthService
         return $this->requestAccessToken();
     }
 
-    /**
-     * Solicitar novo Access Token
-     */
     private function requestAccessToken(): ?string
     {
         try {
@@ -75,17 +69,11 @@ class EbayAuthService
         }
     }
 
-    /**
-     * Verificar se tem token válido
-     */
     public function hasValidToken(): bool
     {
         return Cache::has('ebay_access_token');
     }
 
-    /**
-     * Limpar token (logout)
-     */
     public function clearToken(): void
     {
         Cache::forget('ebay_access_token');

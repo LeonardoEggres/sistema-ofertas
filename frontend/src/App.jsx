@@ -8,19 +8,42 @@ import { Loader2, TrendingDown, Zap, AlertCircle } from "lucide-react";
 function App() {
   const [produtos, setProdutos] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(null);
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [busca, setBusca] = useState("");
+  const [page, setPage] = useState(1);
+  const [perPage] = useState(25);
+  const [hasMore, setHasMore] = useState(true);
   const [sortOption, setSortOption] = useState("maior_desconto"); // default
   const searchTimeout = useRef(null);
 
   useEffect(() => {
-    buscarProdutos();
+    setPage(1);
+    setHasMore(true);
+    buscarProdutos(1, false);
   }, [selectedCategory]);
 
-  const buscarProdutos = async (overrideBusca = null) => {
-    setLoading(true);
-    setError(null);
+  useEffect(() => {
+    const onScroll = () => {
+      if (!hasMore || loadingMore || loading) return;
+      const nearBottom = window.innerHeight + window.scrollY >= document.body.offsetHeight - 300;
+      if (nearBottom) {
+        carregarMais();
+      }
+    };
+
+    window.addEventListener('scroll', onScroll);
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [hasMore, loadingMore, loading]);
+
+  const buscarProdutos = async (pageToLoad = 1, append = false, overrideBusca = null) => {
+    if (append) {
+      setLoadingMore(true);
+    } else {
+      setLoading(true);
+      setError(null);
+    }
 
     try {
       const termoLocal = overrideBusca !== null ? overrideBusca : busca;
@@ -40,14 +63,35 @@ function App() {
       }
 
       const filtros = {
-        limit: 100,
+        page: pageToLoad,
+        per_page: perPage,
         ...(termoBuscaEbay && { q: termoBuscaEbay }),
       };
 
       const data = await ofertasService.buscarOfertas(filtros);
 
       if (data.sucesso) {
-        setProdutos(data.produtos || []);
+        const prod = data.produtos || [];
+        if (Array.isArray(prod)) {
+          if (append) {
+            setProdutos((prev) => {
+              const seen = new Set(prev.map((p) => p.id_externo || p.id || JSON.stringify(p)));
+              const filtered = prod.filter((p) => {
+                const id = p.id_externo || p.id || JSON.stringify(p);
+                return !seen.has(id);
+              });
+              return [...prev, ...filtered];
+            });
+          } else {
+            setProdutos(prod);
+          }
+
+          setHasMore(prod.length === perPage);
+        } else {
+          console.warn('buscarOfertas: campo `produtos` com formato inesperado:', prod);
+          if (!append) setProdutos([]);
+          setHasMore(false);
+        }
       } else {
         setError(data.erro || "Erro ao buscar produtos");
       }
@@ -58,6 +102,7 @@ function App() {
       );
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   };
 
@@ -65,12 +110,21 @@ function App() {
     clearTimeout(searchTimeout.current);
     setBusca(termoBusca);
     searchTimeout.current = setTimeout(() => {
-      buscarProdutos(termoBusca);
+      setPage(1);
+      setHasMore(true);
+      buscarProdutos(1, false, termoBusca);
     }, 500);
   };
 
+  const carregarMais = () => {
+    if (!hasMore || loadingMore) return;
+    const next = page + 1;
+    setPage(next);
+    buscarProdutos(next, true);
+  };
+
   const produtosOrdenados = useMemo(() => {
-    if (!produtos || produtos.length === 0) return [];
+    if (!Array.isArray(produtos) || produtos.length === 0) return [];
 
     const copia = [...produtos];
 
@@ -90,7 +144,7 @@ function App() {
   }, [produtos, sortOption]);
 
   const maiorDescontoPercentual = useMemo(() => {
-    if (!produtos || produtos.length === 0) return 0;
+    if (!Array.isArray(produtos) || produtos.length === 0) return 0;
     const max = produtos.reduce((acc, p) => {
       const valor = Number(p.percentual_desconto) || 0;
       return valor > acc ? valor : acc;
@@ -190,6 +244,21 @@ function App() {
                 />
               ))}
             </div>
+
+            {loadingMore && (
+              <div className="flex items-center justify-center py-6">
+                <Loader2 className="w-8 h-8 text-primary-600 animate-spin mr-2" />
+                <span>Carregando mais ofertas...</span>
+              </div>
+            )}
+
+            {!loadingMore && hasMore && (
+              <div className="flex items-center justify-center py-6">
+                <button onClick={carregarMais} className="btn-primary">
+                  Carregar mais
+                </button>
+              </div>
+            )}
           </>
         )}
 
